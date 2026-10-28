@@ -1,0 +1,12 @@
+{
+  "manifest_version": 2,
+  "name": "XInspect Safe Observer",
+  "version": "1.0",
+  "description": "Adds a visible badge to the local test page.",
+  "content_scripts": [
+    {
+      "matches": ["http://localhost/*", "http://127.0.0.1/*"],
+      "js": ["content.js"]
+    }
+  ]
+}

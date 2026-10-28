@@ -1,0 +1,13 @@
+{
+  "manifest_version": 2,
+  "name": "XInspect Synthetic Risk Fixture",
+  "version": "1.0",
+  "description": "For static analysis tests only. Do not install in a normal profile.",
+  "permissions": ["<all_urls>"],
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"]
+    }
+  ]
+}

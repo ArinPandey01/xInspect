@@ -1,0 +1,24 @@
+node_modules/
+dist/
+reports/
+samples/
+examples/packages/
+*.xpi
+*.zip
+
+# Course submission and source material kept locally
+docs/review*/
+docs/REVIEW_*.md
+*.pdf
+*.tex
+image.jpeg
+
+# Local configuration and editor files
+.agents/
+.aws/
+.codex/
+.env
+.env.*
+!.env.example
+*.log
+.DS_Store
