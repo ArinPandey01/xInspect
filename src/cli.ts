@@ -7,8 +7,8 @@ import { renderHtml } from './report.js';
 import { observePackage } from './dynamic/observe.js';
 
 function usage(): string { return `Usage:
-  xinspect analyze <package.xpi|package.zip> --out <directory>
-  xinspect observe <package.xpi|package.zip> --out <empty-directory> [--seconds 5] [--port 8765] [--firefox /path/to/firefox] [--headed]
+  xinspect analyze <package.xpi|package.zip> --out <directory> [--mozilla-blocklist] [--hash-list /path/to/list.json]
+  xinspect observe <package.xpi|package.zip> --out <empty-directory> [--seconds 5] [--port 8765] [--firefox /path/to/firefox] [--headed] [--mozilla-blocklist] [--hash-list /path/to/list.json]
 
 observe compares fresh Firefox sessions without and with the extension on a controlled local test page.
 Requires Node.js 22+ and Firefox with WebDriver BiDi support. Use an isolated VM for untrusted packages.`; }
@@ -16,10 +16,12 @@ Requires Node.js 22+ and Firefox with WebDriver BiDi support. Use an isolated VM
 async function observe(args: string[]): Promise<void> {
   const values = new Map<string, string>();
   let headed = false;
+  let mozillaBlocklist = false;
   for (let i = 2; i < args.length; i++) {
     const key = args[i]!;
     if (key === '--headed' && !headed) { headed = true; continue; }
-    if (!['--out', '--seconds', '--port', '--firefox'].includes(key) || values.has(key) || !args[i + 1] || args[i + 1]!.startsWith('--')) throw new Error(usage());
+    if (key === '--mozilla-blocklist' && !mozillaBlocklist) { mozillaBlocklist = true; continue; }
+    if (!['--out', '--seconds', '--port', '--firefox', '--hash-list'].includes(key) || values.has(key) || !args[i + 1] || args[i + 1]!.startsWith('--')) throw new Error(usage());
     values.set(key, args[++i]!);
   }
   if (!values.has('--out') || !args[1] || args[1].startsWith('--')) throw new Error(usage());
@@ -32,7 +34,8 @@ async function observe(args: string[]): Promise<void> {
     console.log('observe runs extension code in a temporary Firefox profile. Use an isolated VM for untrusted packages.');
     const result = await observePackage(resolve(args[1]), {
       output, seconds: Number(values.get('--seconds') ?? 5), port: Number(values.get('--port') ?? 8765),
-      firefox: values.get('--firefox') ?? process.env.FIREFOX_BINARY ?? 'firefox', headed, signal: controller.signal
+      firefox: values.get('--firefox') ?? process.env.FIREFOX_BINARY ?? 'firefox', headed, signal: controller.signal,
+      mozillaBlocklist, hashListPath: values.get('--hash-list')
     }, message => console.log(message));
     console.log(`Observation ${result.status}: ${result.extensionName}`);
     console.log(`Open in browser: ${pathToFileURL(join(output, 'observation.html')).href}`);
@@ -48,10 +51,17 @@ async function main(args: string[]): Promise<void> {
   if (args.length === 1 && (args[0] === '--help' || args[0] === '-h')) { console.log(usage()); return; }
   if (args[0] === 'observe') { await observe(args); return; }
   if (args[0] !== 'analyze' || !args[1]) throw new Error(usage());
-  const outIndex = args.indexOf('--out');
-  if (outIndex < 0 || !args[outIndex + 1] || args.length !== 4 || outIndex !== 2) throw new Error(usage());
-  const report = await analyzePackage(resolve(args[1]));
-  const output = resolve(args[outIndex + 1]!);
+  const values = new Map<string, string>();
+  let mozillaBlocklist = false;
+  for (let i = 2; i < args.length; i++) {
+    const key = args[i]!;
+    if (key === '--mozilla-blocklist' && !mozillaBlocklist) { mozillaBlocklist = true; continue; }
+    if (!['--out', '--hash-list'].includes(key) || values.has(key) || !args[i + 1] || args[i + 1]!.startsWith('--')) throw new Error(usage());
+    values.set(key, args[++i]!);
+  }
+  if (!values.has('--out')) throw new Error(usage());
+  const report = await analyzePackage(resolve(args[1]), { mozillaBlocklist, hashListPath: values.get('--hash-list') });
+  const output = resolve(values.get('--out')!);
   await mkdir(output, { recursive: true });
   await Promise.all([
     writeFile(join(output, 'report.json'), JSON.stringify(report, null, 2) + '\n'),

@@ -25,6 +25,9 @@ export function parseManifest(source: string): { summary: ManifestSummary; signa
   const hosts = unique([...permissions.filter(isHostPattern), ...strings(data.host_permissions), ...content.flatMap(x => strings(x.matches))]);
   const optionalHosts = unique([...optionalPermissions.filter(isHostPattern), ...strings(data.optional_host_permissions)]);
   const background = object(data.background);
+  const gecko = object(object(data.browser_specific_settings).gecko);
+  const legacyGecko = object(object(data.applications).gecko);
+  const extensionId = typeof gecko.id === 'string' ? gecko.id : typeof legacyGecko.id === 'string' ? legacyGecko.id : undefined;
   const pages = unique([
     background.page, data.options_page, object(data.options_ui).page, data.devtools_page,
     object(data.action).default_popup, object(data.browser_action).default_popup,
@@ -33,6 +36,7 @@ export function parseManifest(source: string): { summary: ManifestSummary; signa
   const summary: ManifestSummary = {
     name: data.name,
     version: data.version,
+    ...(extensionId ? { extensionId } : {}),
     manifestVersion: data.manifest_version,
     permissions: unique(permissions.filter(x => !isHostPattern(x))),
     optionalPermissions: unique(optionalPermissions.filter(x => !isHostPattern(x))),

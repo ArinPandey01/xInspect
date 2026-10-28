@@ -8,6 +8,7 @@ import { promisify } from 'node:util';
 import JSZip from 'jszip';
 import { analyzePackage } from '../src/analyze.js';
 import { renderHtml } from '../src/report.js';
+import { checkHashList, checkMozillaBlocklist } from '../src/reputation.js';
 
 async function packageFile(files: Record<string, string>, extension = '.xpi'): Promise<string> {
   const dir = await mkdtemp(join(tmpdir(), 'xinspect-test-'));
@@ -115,4 +116,34 @@ test('combined findings retain evidence for every contributing signal', async ()
   assert.ok(combined.evidence.some(x => x.detail.includes('Broad host access')));
   assert.ok(combined.evidence.some(x => x.detail.includes('reads page content')));
   assert.ok(combined.evidence.some(x => x.detail.includes('fetch request')));
+});
+
+test('Mozilla blocklist distinguishes exact blocked versions, absent records, and lookup errors', async () => {
+  const manifest = { name: 'Fixture', version: '1.0', extensionId: 'fixture@example.test', manifestVersion: 3, permissions: [], hostPermissions: [], contentScripts: [], backgroundScripts: [], pages: [] };
+  const blocked = await checkMozillaBlocklist(manifest, async (url) => {
+    assert.match(String(url), /fixture%40example\.test/);
+    return new Response(JSON.stringify({ guid: manifest.extensionId, blocked: ['1.0'], soft_blocked: [], reason: 'Policy violation', is_all_versions: false }), { status: 200 });
+  });
+  assert.equal(blocked.status, 'blocked');
+  assert.match(blocked.detail, /Policy violation/);
+  assert.equal((await checkMozillaBlocklist({ ...manifest, version: '2.0' }, async () => new Response(JSON.stringify({ guid: manifest.extensionId, blocked: ['1.0'], soft_blocked: [] }), { status: 200 }))).status, 'not-listed');
+  assert.equal((await checkMozillaBlocklist(manifest, async () => new Response(JSON.stringify({ guid: manifest.extensionId, blocked: [], soft_blocked: ['1.0'] }), { status: 200 }))).status, 'soft-blocked');
+  assert.equal((await checkMozillaBlocklist(manifest, async () => new Response('', { status: 404 }))).status, 'not-listed');
+  assert.equal((await checkMozillaBlocklist(manifest, async () => { throw new Error('offline'); })).status, 'unavailable');
+});
+
+test('local hash list reports exact matches and does not infer safety from no match', async () => {
+  const path = await packageFile({ 'manifest.json': manifest3({ browser_specific_settings: { gecko: { id: 'fixture@example.test' } } }) });
+  const baseline = await analyzePackage(path);
+  assert.equal(baseline.manifest.extensionId, 'fixture@example.test');
+  const list = join(await mkdtemp(join(tmpdir(), 'xinspect-hashes-')), 'hashes.json');
+  await writeFile(list, JSON.stringify([{ sha256: baseline.package.sha256, label: 'Documented test entry', source: 'Local fixture' }]));
+  const matched = await analyzePackage(path, { hashListPath: list });
+  assert.equal(matched.reputation?.hashes.status, 'hash-match');
+  assert.match(renderHtml(matched), /Documented test entry/);
+  assert.equal((await checkHashList('0'.repeat(64), list)).status, 'not-listed');
+  const output = join(await mkdtemp(join(tmpdir(), 'xinspect-output-')), 'reports');
+  await promisify(execFile)(process.execPath, [join(process.cwd(), 'dist/src/cli.js'), 'analyze', path, '--out', output, '--hash-list', list]);
+  const cliReport = JSON.parse(await readFile(join(output, 'report.json'), 'utf8'));
+  assert.equal(cliReport.reputation.hashes.status, 'hash-match');
 });

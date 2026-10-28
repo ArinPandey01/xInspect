@@ -1,6 +1,6 @@
 # XInspect
 
-XInspect reviews Firefox WebExtension packages (`.xpi` or `.zip`). It inspects the manifest and packaged source code, then can observe the extension in a controlled Firefox run. Results are HTML and JSON reports. Findings identify code and permissions worth reviewing; they are **not malware verdicts**.
+XInspect reviews Firefox WebExtension packages (`.xpi` or `.zip`). It inspects the manifest and packaged source code, can optionally check Mozilla's blocklist and a local SHA-256 reference list, then can observe the extension in a controlled Firefox run. Results are HTML and JSON reports. Source findings identify code and permissions worth reviewing; they are **not malware verdicts**.
 
 ## Quick start
 
@@ -27,6 +27,8 @@ node dist/src/cli.js observe path/to/extension.xpi --out reports/my-observation 
 ```
 
 Each command prints a browser URL for its HTML report. The `observe` output directory must be empty. To try the workflows without an installed extension, run `npm run package:examples` and use an XPI under `examples/packages/`. Those examples are synthetic test fixtures, not malware samples.
+
+Add `--mozilla-blocklist` to request a live Mozilla blocklist check, or `--hash-list path/to/list.json` for exact package hash matching against a local list. The browser interface has an opt-in Mozilla checkbox; set `XINSPECT_HASH_LIST` to a local JSON file before `npm run web` to enable hash matching there. See [usage](docs/usage.md) for the list format and interpretation.
 
 ## Documentation
 

@@ -34,7 +34,7 @@ export async function observePackage(packagePath: string, options: ObserveOption
   if (!Number.isInteger(options.port) || options.port < 1 || options.port > 65535) throw new Error('--port must be between 1 and 65535');
   if (typeof WebSocket === 'undefined') throw new Error('observe requires Node.js 22 or newer');
   progress('Running source review before browser observation…');
-  const report = await analyzePackage(packagePath);
+  const report = await analyzePackage(packagePath, { mozillaBlocklist: options.mozillaBlocklist, hashListPath: options.hashListPath });
   progress('Source review complete; preparing the controlled Firefox test…');
   await mkdir(options.output, { recursive: true });
   if ((await readdir(options.output)).length) throw new Error('Observation output directory must be empty; choose a new --out directory');

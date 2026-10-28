@@ -3,6 +3,7 @@ import { basename, extname } from 'node:path';
 import { openArchive } from './archive.js';
 import { parseManifest } from './manifest.js';
 import { scanHtml, scanJavaScript } from './scan.js';
+import { checkHashList, checkMozillaBlocklist } from './reputation.js';
 import type { Evidence, FileRecord, Finding, Report, Severity, Signal, SignalKind } from './types.js';
 
 const TITLES: Record<SignalKind, string> = {
@@ -60,7 +61,9 @@ function findingsFrom(signals: Signal[]): Finding[] {
   return findings.sort((a, b) => order[a.severity] - order[b.severity] || a.id.localeCompare(b.id));
 }
 
-export async function analyzePackage(filePath: string): Promise<Report> {
+export interface AnalyzeOptions { mozillaBlocklist?: boolean; hashListPath?: string }
+
+export async function analyzePackage(filePath: string, options: AnalyzeOptions = {}): Promise<Report> {
   const extension = extname(filePath).toLowerCase();
   if (extension !== '.xpi' && extension !== '.zip') throw new Error('Input must be a .xpi or .zip package');
   const archive = await openArchive(filePath);
@@ -71,7 +74,7 @@ export async function analyzePackage(filePath: string): Promise<Report> {
   const signals: Signal[] = [...manifestSignals];
   const limitations: string[] = [
     'Review priority is not a malware classification. Static inspection cannot confirm runtime behavior or data transfer.',
-    'Known-malware hash matching is not included in this version.'
+    'A blocklist match is not necessarily a malware finding. A missing blocklist or hash-list match does not establish safety.'
   ];
   const inventory: FileRecord[] = [];
   const paths = new Set(archive.entries.map(x => x.path));
@@ -112,13 +115,19 @@ export async function analyzePackage(filePath: string): Promise<Report> {
       limitations.push(`Could not scan ${entry.path}: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
+  const sha256 = createHash('sha256').update(archive.bytes).digest('hex');
+  const [mozilla, hashes] = await Promise.all([
+    options.mozillaBlocklist ? checkMozillaBlocklist(summary) : Promise.resolve({ source: 'Mozilla Add-ons blocklist', status: 'not-checked' as const, detail: 'Online Mozilla lookup was not requested.' }),
+    checkHashList(sha256, options.hashListPath)
+  ]);
   return {
     schemaVersion: 1,
     generatedAt: new Date().toISOString(),
-    package: { name: basename(filePath), bytes: archive.bytes.length, sha256: createHash('sha256').update(archive.bytes).digest('hex') },
+    package: { name: basename(filePath), bytes: archive.bytes.length, sha256 },
     manifest: summary,
     inventory,
     findings: findingsFrom(signals),
+    reputation: { mozilla, hashes },
     limitations
   };
 }

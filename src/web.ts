@@ -12,6 +12,7 @@ const PORT = Number(process.env.XINSPECT_WEB_PORT ?? 4173);
 const OBSERVE_PORT = Number(process.env.XINSPECT_OBSERVE_PORT ?? 8765);
 const MAX_UPLOAD = 25 * 1024 * 1024;
 const REPORT_ROOT = resolve(process.env.XINSPECT_REPORTS_DIR ?? 'reports/web');
+const HASH_LIST_PATH = process.env.XINSPECT_HASH_LIST ? resolve(process.env.XINSPECT_HASH_LIST) : undefined;
 type Mode = 'static' | 'dynamic' | 'both';
 type Job = {
   id: string; name: string; mode: Mode; status: 'running' | 'complete' | 'failed';
@@ -38,6 +39,7 @@ const page = String.raw`<!doctype html>
 <button class="mode" data-mode="dynamic"><b>Browser observation</b><span>Run in Firefox against a local test page</span></button>
 <button class="mode" data-mode="both"><b>Both</b><span>Run source review and browser observation</span></button></div>
 <div class="settings" id="settings" hidden><label for="seconds">Observation window</label><input id="seconds" type="number" min="1" max="60" value="5"><span>seconds</span></div>
+<label class="ack"><input id="mozillaCheck" type="checkbox"><span>Check Mozilla’s online blocklist for this Firefox extension ID and version. This sends the ID to Mozilla.</span></label>
 <div class="warning" id="warning" hidden><span>⚠</span><div><strong>Browser observation runs the extension code.</strong> Firefox uses a temporary profile, a local test page, and restricted HTTP connections. These controls are not an operating-system sandbox.</div></div>
 <label class="ack" id="ack" hidden><input id="ackCheck" type="checkbox"><span>I understand that unknown or untrusted packages should only be run inside a disposable isolated virtual machine.</span></label>
 <button id="run" class="run" disabled>Start source review</button><p class="footnote">Archives are checked against XInspect’s package limits before analysis begins.</p>
@@ -45,7 +47,7 @@ const page = String.raw`<!doctype html>
 <section class="card" id="progress" hidden><div class="progress-head"><h2 style="margin:0">Analysis progress</h2><span id="status" class="status running">In progress</span></div><p class="stage" id="stage">Preparing…</p><div class="bar" id="bar"><span></span></div><div class="logs" id="logs" aria-live="polite"></div><div class="error" id="error"></div><div class="results" id="results" hidden></div></section>
 <div class="principle"><span>●</span><div><b>Evidence, not verdicts.</b> Findings highlight code and access that may deserve review. They do not classify an extension as malware.</div></div>
 </main><script>
-const input=document.querySelector('#fileInput'),drop=document.querySelector('#drop'),fileInfo=document.querySelector('#fileInfo'),fileName=document.querySelector('#fileName'),fileSize=document.querySelector('#fileSize'),run=document.querySelector('#run'),buttons=[...document.querySelectorAll('.mode')],settings=document.querySelector('#settings'),warning=document.querySelector('#warning'),ack=document.querySelector('#ack'),ackCheck=document.querySelector('#ackCheck'),seconds=document.querySelector('#seconds'),progress=document.querySelector('#progress'),status=document.querySelector('#status'),stage=document.querySelector('#stage'),bar=document.querySelector('#bar'),logs=document.querySelector('#logs'),error=document.querySelector('#error'),results=document.querySelector('#results');let file=null,mode='static',busy=false;
+const input=document.querySelector('#fileInput'),drop=document.querySelector('#drop'),fileInfo=document.querySelector('#fileInfo'),fileName=document.querySelector('#fileName'),fileSize=document.querySelector('#fileSize'),run=document.querySelector('#run'),buttons=[...document.querySelectorAll('.mode')],settings=document.querySelector('#settings'),warning=document.querySelector('#warning'),ack=document.querySelector('#ack'),ackCheck=document.querySelector('#ackCheck'),mozillaCheck=document.querySelector('#mozillaCheck'),seconds=document.querySelector('#seconds'),progress=document.querySelector('#progress'),status=document.querySelector('#status'),stage=document.querySelector('#stage'),bar=document.querySelector('#bar'),logs=document.querySelector('#logs'),error=document.querySelector('#error'),results=document.querySelector('#results');let file=null,mode='static',busy=false;
 const sizeText=n=>n<1024*1024?(n/1024).toFixed(0)+' KiB':(n/1024/1024).toFixed(1)+' MiB';
 function setFile(f){if(!f)return;file=f;fileInfo.hidden=false;fileName.textContent=f.name;fileSize.textContent=sizeText(f.size);updateButton()}
 function updateButton(){const unsafe=mode!=='static'&&!ackCheck.checked;run.disabled=busy||!file||unsafe;run.textContent=mode==='static'?'Start source review':mode==='dynamic'?'Start browser observation':'Start both reviews'}
@@ -53,7 +55,7 @@ input.addEventListener('change',()=>setFile(input.files[0]));for(const ev of ['d
 buttons.forEach(b=>b.addEventListener('click',()=>{buttons.forEach(x=>x.classList.toggle('selected',x===b));mode=b.dataset.mode;const dynamic=mode!=='static';settings.hidden=!dynamic;warning.hidden=!dynamic;ack.hidden=!dynamic;if(!dynamic)ackCheck.checked=false;updateButton()}));ackCheck.addEventListener('change',updateButton);
 function showJob(job){status.textContent=job.status==='running'?'In progress':job.status==='failed'?'Could not complete':job.observationStatus==='partial'?'Completed with partial observation':job.observationStatus==='failed'?'Source review ready · browser observation failed':'Complete';status.className='status '+(job.status==='running'?'running':job.status==='failed'||job.observationStatus==='failed'?'failed':'');stage.textContent=job.stage;logs.textContent=job.log.join('\n');logs.scrollTop=logs.scrollHeight;error.textContent=job.error||'';bar.classList.toggle('done',job.status!=='running');results.replaceChildren();for(const [label,url] of Object.entries(job.reports||{})){const a=document.createElement('a');a.href=url;a.target='_blank';a.rel='noopener';a.textContent=label;results.append(a)}results.hidden=!Object.keys(job.reports||{}).length}
 async function poll(id){while(true){const r=await fetch('/api/jobs/'+id,{cache:'no-store'});if(!r.ok)throw new Error('Could not read analysis progress');const job=await r.json();showJob(job);if(job.status!=='running')return job;await new Promise(resolve=>setTimeout(resolve,600))}}
-run.addEventListener('click',()=>{if(!file||busy)return;busy=true;updateButton();progress.hidden=false;error.textContent='';results.hidden=true;logs.textContent='Uploading package…';stage.textContent='Uploading package';bar.classList.remove('done');const xhr=new XMLHttpRequest();xhr.open('POST','/api/jobs?mode='+mode+'&seconds='+encodeURIComponent(seconds.value)+'&filename='+encodeURIComponent(file.name));xhr.setRequestHeader('X-XInspect-Request','1');xhr.setRequestHeader('Content-Type','application/octet-stream');xhr.upload.onprogress=e=>{if(e.lengthComputable)stage.textContent='Uploading package · '+Math.round(e.loaded/e.total*100)+'%'};xhr.onload=async()=>{try{const body=JSON.parse(xhr.responseText);if(xhr.status!==202)throw new Error(body.error||'Could not start analysis');stage.textContent='Package received; starting analysis';const job=await poll(body.id);if(job.status==='failed')throw new Error(job.error||'Analysis failed');}catch(e){error.textContent=e.message;status.textContent='Could not complete';status.className='status failed'}finally{busy=false;updateButton()}};xhr.onerror=()=>{error.textContent='Upload failed. Check that the local XInspect server is running.';status.textContent='Could not complete';status.className='status failed';busy=false;updateButton()};xhr.send(file)});
+run.addEventListener('click',()=>{if(!file||busy)return;busy=true;updateButton();progress.hidden=false;error.textContent='';results.hidden=true;logs.textContent='Uploading package…';stage.textContent='Uploading package';bar.classList.remove('done');const xhr=new XMLHttpRequest();xhr.open('POST','/api/jobs?mode='+mode+'&seconds='+encodeURIComponent(seconds.value)+'&mozilla='+mozillaCheck.checked+'&filename='+encodeURIComponent(file.name));xhr.setRequestHeader('X-XInspect-Request','1');xhr.setRequestHeader('Content-Type','application/octet-stream');xhr.upload.onprogress=e=>{if(e.lengthComputable)stage.textContent='Uploading package · '+Math.round(e.loaded/e.total*100)+'%'};xhr.onload=async()=>{try{const body=JSON.parse(xhr.responseText);if(xhr.status!==202)throw new Error(body.error||'Could not start analysis');stage.textContent='Package received; starting analysis';const job=await poll(body.id);if(job.status==='failed')throw new Error(job.error||'Analysis failed');}catch(e){error.textContent=e.message;status.textContent='Could not complete';status.className='status failed'}finally{busy=false;updateButton()}};xhr.onerror=()=>{error.textContent='Upload failed. Check that the local XInspect server is running.';status.textContent='Could not complete';status.className='status failed';busy=false;updateButton()};xhr.send(file)});
 </script></body></html>`;
 
 function respond(res: ServerResponse, status: number, body: string, type = 'text/plain; charset=utf-8'): void {
@@ -84,7 +86,7 @@ function addLog(job: Job, message: string): void {
   job.log.push(`${new Date().toLocaleTimeString()}  ${message}`);
 }
 
-async function execute(job: Job, bytes: Buffer, mode: Mode, seconds: number): Promise<void> {
+async function execute(job: Job, bytes: Buffer, mode: Mode, seconds: number, mozillaBlocklist: boolean): Promise<void> {
   let workDir: string | undefined;
   try {
     workDir = await mkdtemp(join(tmpdir(), 'xinspect-web-'));
@@ -92,7 +94,7 @@ async function execute(job: Job, bytes: Buffer, mode: Mode, seconds: number): Pr
     await writeFile(packagePath, bytes, { mode: 0o600 });
     if (mode === 'static' || mode === 'both') {
       addLog(job, 'Checking archive structure and scanning manifest, JavaScript, and HTML…');
-      const report = await analyzePackage(packagePath);
+      const report = await analyzePackage(packagePath, { mozillaBlocklist, hashListPath: HASH_LIST_PATH });
       const out = join(REPORT_ROOT, job.id, 'static');
       await mkdir(out, { recursive: true });
       await Promise.all([
@@ -108,7 +110,8 @@ async function execute(job: Job, bytes: Buffer, mode: Mode, seconds: number): Pr
       const out = join(REPORT_ROOT, job.id, 'dynamic');
       const observation = await observePackage(packagePath, {
         output: out, seconds, port: OBSERVE_PORT,
-        firefox: process.env.FIREFOX_BINARY ?? 'firefox', headed: false
+        firefox: process.env.FIREFOX_BINARY ?? 'firefox', headed: false,
+        mozillaBlocklist, hashListPath: HASH_LIST_PATH
       }, message => addLog(job!, message));
       job.observationStatus = observation.status;
       job.reports['Browser observation'] = `/reports/${job.id}/dynamic/observation.html`;
@@ -152,8 +155,10 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
     }
     const mode = url.searchParams.get('mode') as Mode | null;
     const seconds = Number(url.searchParams.get('seconds') ?? '5');
+    const mozilla = url.searchParams.get('mozilla');
     if (!mode || !['static', 'dynamic', 'both'].includes(mode)) { json(res, 400, { error: 'Select source, browser, or both reviews' }); return; }
     if (!Number.isInteger(seconds) || seconds < 1 || seconds > 60) { json(res, 400, { error: 'Observation window must be between 1 and 60 seconds' }); return; }
+    if (mozilla !== 'true' && mozilla !== 'false') { json(res, 400, { error: 'Invalid Mozilla lookup option' }); return; }
     if (activeJob) { json(res, 409, { error: 'Another analysis is already running. Wait for it to finish first.' }); return; }
     activeJob = 'uploading';
     let bytes: Buffer;
@@ -166,7 +171,7 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
     const job: Job = { id, name, mode, status: 'running', stage: 'Preparing analysis', log: [], startedAt: new Date().toISOString(), reports: {} };
     jobs.set(id, job); activeJob = id; addLog(job, `${name} received · ${sizeText(bytes.length)}`);
     json(res, 202, { id });
-    void execute(job, bytes, mode, seconds);
+    void execute(job, bytes, mode, seconds, mozilla === 'true');
     return;
   }
   const reportMatch = /^\/reports\/([a-f0-9-]+)\/(static|dynamic)\/(report\.html|report\.json|observation\.html|observation\.json)$/.exec(url.pathname);

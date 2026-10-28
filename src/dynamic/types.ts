@@ -66,5 +66,7 @@ export interface ObserveOptions {
   port: number;
   firefox: string;
   headed: boolean;
+  mozillaBlocklist?: boolean;
+  hashListPath?: string;
   signal?: AbortSignal;
 }

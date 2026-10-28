@@ -30,6 +30,7 @@ export interface FileRecord {
 export interface ManifestSummary {
   name: string;
   version: string;
+  extensionId?: string;
   manifestVersion: number;
   permissions: string[];
   optionalPermissions?: string[];
@@ -40,6 +41,14 @@ export interface ManifestSummary {
   pages: string[];
 }
 
+export interface ReputationCheck {
+  source: string;
+  status: 'not-checked' | 'unavailable' | 'not-listed' | 'blocked' | 'soft-blocked' | 'hash-match';
+  detail: string;
+  url?: string;
+  checkedAt?: string;
+}
+
 export interface Report {
   schemaVersion: 1;
   generatedAt: string;
@@ -47,5 +56,6 @@ export interface Report {
   manifest: ManifestSummary;
   inventory: FileRecord[];
   findings: Finding[];
+  reputation?: { mozilla: ReputationCheck; hashes: ReputationCheck };
   limitations: string[];
 }
